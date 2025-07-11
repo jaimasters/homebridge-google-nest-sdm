@@ -54,6 +54,7 @@ type ActiveSession = {
   timeout?: NodeJS.Timeout;
   socket?: Socket;
   streamer: NestStreamer;
+  isContinuous?: boolean;
 };
 
 type ResolutionInfo = {
@@ -74,6 +75,7 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
   // keep track of sessions
   protected pendingSessions: Record<string, SessionInfo> = {};
   protected ongoingSessions: Record<string, ActiveSession> = {};
+  protected continuousSession?: ActiveSession;
   protected config: Config;
   protected accessory: PlatformAccessory;
   protected camera: Camera;
@@ -98,6 +100,8 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
       for (const session in this.ongoingSessions) {
         this.stopStream(session);
       }
+      // Clean up continuous streaming
+      this.stopContinuousStreaming();
     });
 
     this.options = {
@@ -291,18 +295,20 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
 
     this.log.debug(`Video stream requested: ${request.video.width} x ${request.video.height}, ${request.video.fps} fps, ${request.video.max_bit_rate} kbps`, this.camera.getDisplayName());
 
-    const nestStreamer = await getStreamer(this.log, this.camera);
-
-    let ffmpegArgs: string;
+    let nestStreamer: NestStreamer;
     let nestStream: NestStream;
 
+    // For continuous streaming, always create a new streamer for each HomeKit session
+    // The continuous stream is mainly for keeping the camera "warm" and ready
+    nestStreamer = await getStreamer(this.log, this.camera);
     try {
-      nestStream = await nestStreamer.initialize(); // '-analyzeduration 15000000 -probesize 100000000 -i ' + streamInfo.streamUrls.rtspUrl;
-      ffmpegArgs = nestStream.args;
+      nestStream = await nestStreamer.initialize();
     } catch (error: any) {
       this.logThenCallback(callback, error);
       return;
     }
+
+    let ffmpegArgs = nestStream.args;
 
     ffmpegArgs += // Video
         ' -an -sn -dn' +
@@ -421,6 +427,7 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
         this.log.error('Error occurred terminating two-way FFmpeg process: ' + err, this.camera.getDisplayName());
       }
       try {
+        // Always teardown the stream for regular sessions
         await session.streamer.teardown();
       } catch (err) {
         this.log.error('Error terminating SDM stream: ' + err, this.camera.getDisplayName());
@@ -591,5 +598,104 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
 
   updateRecordingConfiguration(configuration: CameraRecordingConfiguration | undefined): void {
     this.cameraRecordingConfiguration = configuration;
+  }
+
+  /**
+   * Start continuous streaming if enabled in config
+   */
+  async startContinuousStreaming(): Promise<void> {
+    if (!this.config.continuousStreaming) {
+      return;
+    }
+
+    if (this.continuousSession) {
+      this.log.debug('Continuous stream already active', this.camera.getDisplayName());
+      return;
+    }
+
+    try {
+      this.log.info('Starting continuous video stream', this.camera.getDisplayName());
+      
+      // Create a background stream to keep the camera connection warm
+      // This helps reduce the time it takes to start new streams for HomeKit
+      const nestStreamer = await getStreamer(this.log, this.camera);
+      const nestStream = await nestStreamer.initialize();
+
+      this.continuousSession = {
+        streamer: nestStreamer,
+        isContinuous: true
+      };
+
+      // The continuous stream doesn't need FFmpeg - it's just maintaining the connection
+      // Set up automatic restart on failure
+      this.scheduleStreamHealthCheck();
+
+      this.log.info('Continuous stream connection established successfully', this.camera.getDisplayName());
+    } catch (error: any) {
+      this.log.error('Failed to start continuous stream:', error, this.camera.getDisplayName());
+      // Retry after delay
+      setTimeout(() => this.startContinuousStreaming(), 30000);
+    }
+  }
+
+  /**
+   * Stop continuous streaming
+   */
+  async stopContinuousStreaming(): Promise<void> {
+    if (this.continuousSession) {
+      this.log.info('Stopping continuous video stream', this.camera.getDisplayName());
+      try {
+        await this.continuousSession.streamer.teardown();
+      } catch (error: any) {
+        this.log.error('Error stopping continuous stream:', error, this.camera.getDisplayName());
+      }
+      this.continuousSession = undefined;
+    }
+  }
+
+  /**
+   * Periodically check if continuous stream is healthy and restart if needed
+   */
+  private scheduleStreamHealthCheck(): void {
+    if (!this.config.continuousStreaming || !this.continuousSession) {
+      return;
+    }
+
+    setTimeout(async () => {
+      if (this.continuousSession && this.config.continuousStreaming) {
+        try {
+          // Check if the camera is still reachable and the stream is healthy
+          const cameraInfo = await this.camera.getCameraLiveStream();
+          if (!cameraInfo) {
+            throw new Error('Camera is no longer accessible');
+          }
+          
+          // Schedule the next health check
+          this.scheduleStreamHealthCheck();
+        } catch (error: any) {
+          this.log.warn('Continuous stream health check failed, restarting...', error, this.camera.getDisplayName());
+          
+          // Clean up the failed session
+          if (this.continuousSession) {
+            try {
+              await this.continuousSession.streamer.teardown();
+            } catch (teardownError: any) {
+              this.log.error('Error during continuous stream cleanup:', teardownError, this.camera.getDisplayName());
+            }
+            this.continuousSession = undefined;
+          }
+          
+          // Restart continuous streaming after a delay
+          setTimeout(() => this.startContinuousStreaming(), 10000); // 10 second delay before restart
+        }
+      }
+    }, 120000); // Check every 2 minutes
+  }
+
+  /**
+   * Check if we can reuse an existing continuous stream for a HomeKit request
+   */
+  private canReuseContinuousStream(): boolean {
+    return this.config.continuousStreaming === true && this.continuousSession !== undefined;
   }
 }

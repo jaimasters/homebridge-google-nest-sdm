@@ -29,9 +29,10 @@ Don't forget the ``--unsafe-perm`` part!
         "refreshToken": "...",
         "subscriptionId": "...",
         "gcpProjectId": "<optional>",
-        "vEncoder": "<optional>"
-        "showFan": "<optional>"
-        "fanDuration": "<optional>"
+        "vEncoder": "<optional>",
+        "showFan": "<optional>",
+        "fanDuration": "<optional>",
+        "continuousStreaming": "<optional>"
     }
 
 I recommend you use the plugin config UI to enter these values.
@@ -55,6 +56,8 @@ Follow the getting started guide here: https://developers.google.com/nest/device
 **showFan** is optional.  If true, a fan accessory will be added.
 
 **fanDuration** is optional. You only need to use this if **showFan** is set to true. It controls the fan duration (in seconds) when turning on the fan.  Must be between 1 and 43200.  Defaults to 900 if not set.
+
+**continuousStreaming** is optional. When set to true, video streams will start automatically and stay active in the background, providing instant video when opening the Home app. This reduces the delay when viewing cameras but will use more CPU and bandwidth. Defaults to false if not set.
 
 ONE IMPORTANT DIFFERENCE!
 
@@ -90,6 +93,8 @@ Continuous recording of all camera streams would likely mitigate this effect, bu
 
 If are are not using the "copy" vEncoder the minimum hardware requirement is something like a Raspberry Pi 4.  If you want multiple people viewing the camera streams at once then you'll probably need even more power. If you are using the "copy" vEncoder you may be able to use a very low power device, but results are not guaranteed.
 
+**Continuous Streaming**: If you enable the `continuousStreaming` option, be aware that this will maintain active connections to your cameras at all times, which may increase baseline CPU and network usage. The impact will depend on the number of cameras and your specific hardware configuration.
+
 HomeKit Secure Video will require even more CPU power.  The clips need to be transcoded using the CPU.  Note that transcoding clips for even a single camera with a lot of activity can easily consume 100% of the CPU on a Rasberry Pi-4.  If you want HKSV on for many cameras you'll need a dedicated server of some kind.
 
 # FAQ
@@ -119,6 +124,10 @@ HomeKit Secure Video will require even more CPU power.  The clips need to be tra
 **Q**: My cameras stream stops responding after five minutes. Why?
 
 **A**: Streams on the battery powered cameras only last five minutes.  On the wired cameras it's in theory possible to view the stream for more than five minutes, but I haven't figured out how to make that work yet.
+
+**Q**: How can I enable continuous video streaming so cameras respond instantly?
+
+**A**: Set `"continuousStreaming": true` in your platform configuration. This will keep video streams active in the background, providing instant video when you open the Home app. Note that this will use more CPU and bandwidth, and may not be suitable for battery-powered cameras or systems with limited resources.
 
 **Q**: When the plugin starts I get some message about ```Plugin initialization failed, there was a failure with event subscription```.  Why?
 

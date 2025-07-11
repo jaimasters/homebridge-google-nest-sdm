@@ -12,6 +12,19 @@ class DoorbellAccessory extends MotionAccessory_1.MotionAccessory {
         this.streamingDelegate = new DoorbellStreamingDelegate_1.DoorbellStreamingDelegate(log, api, this.platform, this.device, this.accessory);
         this.accessory.configureController(this.streamingDelegate.getController());
         this.device.onRing = this.handleRing.bind(this);
+        // Start continuous streaming if enabled
+        this.initializeContinuousStreaming();
+    }
+    async initializeContinuousStreaming() {
+        // Add a delay to ensure the accessory is fully initialized
+        setTimeout(async () => {
+            try {
+                await this.streamingDelegate.startContinuousStreaming();
+            }
+            catch (error) {
+                this.log.error('Failed to initialize continuous streaming:', error, this.device.getDisplayName());
+            }
+        }, 5000); // 5 second delay
     }
     handleRing() {
         this.log.debug('Doorbell ring!', this.accessory.displayName);
