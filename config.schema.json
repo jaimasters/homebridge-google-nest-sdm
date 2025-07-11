@@ -56,6 +56,13 @@
         "condition": {
           "functionBody": "return model.showFan"
         }
+      },
+      "continuousStreaming": {
+        "title": "Enable Continuous Streaming",
+        "description": "When enabled, video streams will start automatically and stay active, providing instant video when opening the Home app. This will use more CPU and bandwidth.",
+        "type": "boolean",
+        "default": false,
+        "required": false
       }
     }
   }
